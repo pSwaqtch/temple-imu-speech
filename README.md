@@ -5,7 +5,7 @@ temple, streamed by an ESP32 over WiFi to a PC that shows it live, records it, a
 wearer is speaking and at what pitch. Other people's voices and room noise don't reach the sensor —
 only the wearer's own bone-conducted speech does.
 
-![Live dashboard: three long "hellooo"s detected, pitch line drawn over the spectrogram](docs/images/dashboard.png)
+<img src="docs/images/dashboard.png" width="720" alt="Live dashboard: three long hellooos detected, pitch line drawn over the spectrogram">
 
 *Live dashboard during three long "hellooo"s. The **orange lines** are the detected pitch (f0 ≈ 118 Hz)
 drawn over the spectrogram; the sidebar shows the speaking state, current pitch, per-axis
@@ -16,11 +16,11 @@ voice-band vibration and link health. (Captured by replaying a real recording th
 Each spoken "hello" shows up as a thin horizontal line at the voice's fundamental frequency — here
 about 130–140 Hz, with the small rise and fall of the word:
 
-![Spectrogram of four short hellos](docs/images/spectrogram-hellos.png)
+<img src="docs/images/spectrogram-hellos.png" width="560" alt="Spectrogram of four short hellos">
 
 Held "hellooo"s give longer lines, which the detector follows for their whole length:
 
-![Spectrogram of longer hellos with the detected pitch overlaid](docs/images/spectrogram-long-hellos-pitch.png)
+<img src="docs/images/spectrogram-long-hellos-pitch.png" width="560" alt="Spectrogram of longer hellos with the detected pitch overlaid">
 
 *(This screenshot is from before the sustain fix described below: the detector only caught the
 start of each word. It now tracks the full line, as in the dashboard image at the top.)*
