@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Temple IMU · live</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-0: #f3f3f1; --surface-1: #fcfcfb; --border: #e2e1dc;
+    --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #7a7974;
+    --grid: #ecebe7; --axis: #c9c8c2;
+    --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a;
+    --good: #0b7a3e; --critical: #c8281e; --accent: #2a78d6;
+    --spec: #fcfcfb,#cde2fb,#6da7ec,#256abf,#0d366b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --surface-0: #111110; --surface-1: #1a1a19; --border: #2c2c2a;
+      --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+      --grid: #252523; --axis: #3a3a37;
+      --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70;
+      --good: #2fb36a; --critical: #ef5a4f; --accent: #3987e5;
+      --spec: #1a1a19,#104281,#2a78d6,#86b6ef,#e6f0fd;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--surface-0); color: var(--text-primary);
+         font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .num { font-variant-numeric: tabular-nums; }
+  header { display: flex; align-items: center; gap: 24px; padding: 12px 20px;
+           border-bottom: 1px solid var(--border); background: var(--surface-1); flex-wrap: wrap; }
+  h1 { font-size: 15px; font-weight: 600; margin: 0; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+  .dot.ok { background: var(--good); } .dot.bad { background: var(--critical); }
+  .kv { display: flex; gap: 18px; font-size: 13px; color: var(--text-secondary); flex-wrap: wrap; }
+  .kv b { color: var(--text-primary); font-weight: 500; }
+  .rec { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  input[type=text] { font: inherit; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px;
+                     background: var(--surface-0); color: var(--text-primary); width: 180px; }
+  button { font: inherit; padding: 5px 14px; border-radius: 6px; border: 1px solid var(--border);
+           background: var(--surface-0); color: var(--text-primary); cursor: pointer; }
+  button.recording { background: var(--critical); border-color: var(--critical); color: #fff; }
+  #recinfo { font-size: 12px; color: var(--text-secondary); min-width: 160px; }
+  main { padding: 16px 20px; display: grid; gap: 16px; grid-template-columns: 1fr 260px; }
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .card h2 { font-size: 13px; font-weight: 600; margin: 0 0 2px; }
+  .sub { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
+  .chart { position: relative; height: 220px; }
+  .chart canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--text-secondary); }
+  .sw { display: inline-block; width: 10px; height: 3px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+  .row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .tip { position: absolute; pointer-events: none; background: var(--surface-1); border: 1px solid var(--border);
+         border-radius: 6px; padding: 4px 8px; font-size: 12px; white-space: nowrap; display: none;
+         box-shadow: 0 2px 8px rgb(0 0 0 / .12); }
+  .meter { margin: 10px 0 14px; }
+  .meter .row { font-size: 13px; }
+  .bar { height: 6px; border-radius: 3px; background: var(--grid); margin-top: 4px; overflow: hidden; }
+  .bar > div { height: 100%; border-radius: 3px; width: 0; transition: width .3s; }
+  .big { font-size: 22px; font-weight: 600; }
+  select { font: inherit; font-size: 12px; background: var(--surface-0); color: var(--text-primary);
+           border: 1px solid var(--border); border-radius: 6px; padding: 2px 4px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Temple IMU</h1>
+  <span class="pill"><span id="dot" class="dot"></span><span id="conn">connecting…</span></span>
+  <div class="kv num">
+    <span>rate <b id="rate">–</b></span>
+    <span>lost <b id="lost">–</b></span>
+    <span>discontinuities <b id="disc">–</b></span>
+    <span>device <b id="dev">–</b></span>
+  </div>
+  <div class="rec">
+    <input id="label" type="text" placeholder="label, e.g. vowels_a">
+    <button id="recbtn">● Record</button>
+    <span id="recinfo" class="num"></span>
+  </div>
+</header>
+
+<main>
+  <div style="display:grid; gap:16px; min-width:0">
+    <section class="card">
+      <div class="row">
+        <div><h2>Acceleration, high-passed at 50 Hz</h2>
+          <div class="sub">last 5 s · mg · gravity and head motion removed</div></div>
+        <div class="legend">
+          <span><span class="sw" style="background:var(--series-1)"></span>x</span>
+          <span><span class="sw" style="background:var(--series-2)"></span>y</span>
+          <span><span class="sw" style="background:var(--series-3)"></span>z</span>
+        </div>
+      </div>
+      <div class="chart" id="wavebox"><canvas id="wave"></canvas><div class="tip" id="wavetip"></div></div>
+    </section>
+    <section class="card">
+      <div class="row">
+        <div><h2>Spectrogram</h2><div class="sub">last 5 s · 0 – Nyquist · dB, auto-ranged</div></div>
+        <div class="legend" style="align-items:center; gap:14px">
+        <span><span class="sw" style="background:var(--series-2); height:2px"></span>pitch (f0)</span>
+        <label>axis
+          <select id="axis"><option value="0">x</option><option value="1">y</option>
+            <option value="2">z</option><option value="3" selected>x+y+z power</option></select></label>
+        </div>
+      </div>
+      <div class="chart" id="specbox"><canvas id="spec"></canvas><div class="tip" id="spectip"></div></div>
+    </section>
+  </div>
+
+  <aside class="card">
+    <h2>Voice</h2>
+    <div class="sub">from skull vibration only (timu.voice)</div>
+    <div class="row" style="margin:6px 0 2px">
+      <span class="pill" style="font-size:15px; color:var(--text-primary)"><span id="vdot" class="dot"></span><span id="vstate">–</span></span>
+      <span class="num"><span class="big" id="vf0">–</span> Hz</span>
+    </div>
+    <div class="sub num" id="vinfo" style="margin-bottom:16px">&nbsp;</div>
+    <h2>Voice-band vibration</h2>
+    <div class="sub">80–500 Hz RMS per axis, 1 s window. Silence ≈ sensor noise floor.</div>
+    <div id="meters"></div>
+    <h2 style="margin-top:18px">Orientation</h2>
+    <div class="sub">mean acceleration (gravity), g</div>
+    <div id="grav" class="num" style="font-size:13px; color:var(--text-secondary)">–</div>
+    <h2 style="margin-top:18px">Device</h2>
+    <div id="devstats" class="num" style="font-size:13px; color:var(--text-secondary); line-height:1.7">–</div>
+  </aside>
+</main>
+
+<script>
+"use strict";
+// ---- config -----------------------------------------------------------------
+const WINDOW_S = 5, BUF = 8192, NFFT = 256, HOP = 32, HP_HZ = 50;
+const AXES = ["x", "y", "z"];
+
+// ---- theme ------------------------------------------------------------------
+let C = {};
+function readTheme() {
+  const s = getComputedStyle(document.documentElement), v = n => s.getPropertyValue(n).trim();
+  C = { surface: v("--surface-1"), grid: v("--grid"), axis: v("--axis"), text: v("--text-muted"),
+        series: [v("--series-1"), v("--series-2"), v("--series-3")],
+        lut: buildLut(v("--spec").split(",").map(h => h.trim())) };
+}
+function hex(h) { return [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)); }
+function buildLut(stops) {
+  const rgb = stops.map(hex), lut = new Uint8ClampedArray(256 * 3);
+  for (let i = 0; i < 256; i++) {
+    const t = i / 255 * (rgb.length - 1), k = Math.min(Math.floor(t), rgb.length - 2), f = t - k;
+    for (let c = 0; c < 3; c++) lut[i * 3 + c] = rgb[k][c] + (rgb[k + 1][c] - rgb[k][c]) * f;
+  }
+  return lut;
+}
+readTheme();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { readTheme(); specImg = null; });
+
+// ---- state ------------------------------------------------------------------
+let fs = 1125;
+const hp = [new Float32Array(BUF), new Float32Array(BUF), new Float32Array(BUF)];  // high-passed mg
+const rawRing = [new Float32Array(BUF), new Float32Array(BUF), new Float32Array(BUF)]; // g, for FFT
+let head = 0, total = 0;                 // ring write position / samples written
+let expected = null, lastBoot = null, lastSeg = null, sinceHop = 0;
+let voiceFrames = [];        // {s: sample (window centre), v: voiced, f0}
+let voiceRate = 1125, utterances = 0, lastVoiced = false, lastPitch = null;
+const NFFT_DET = 256;       // detector window (timu.voice default), to align with spectrogram columns
+const hpState = AXES.map(() => ({ x: 0, y: 0, primed: false }));  // primed=false -> seed from next sample
+
+// ---- packet decode (mirror of protocol.h) -----------------------------------
+function parsePacket(buf) {
+  const v = new DataView(buf);
+  if (buf.byteLength < 48 || v.getUint32(0, true) !== 0x554D4954 || v.getUint8(4) !== 1) return null;
+  const layout = v.getUint8(5), words = (layout & 1 ? 3 : 0) + (layout & 2 ? 3 : 0);
+  const n = v.getUint16(8, true);
+  if (buf.byteLength !== 48 + n * words * 2) return null;
+  return { accelFs: v.getUint8(6), n, words, segment: v.getUint16(10, true),
+           first: Number(v.getBigUint64(16, true)), rate: v.getFloat32(32, true),
+           boot: v.getUint32(36, true), data: new Int16Array(buf, 48, n * words) };
+}
+
+function push(ax, ay, az) {  // one sample, in g (NaN = gap)
+  const a = HP_HZ / fs, rc = 1 / (1 + 2 * Math.PI * a);  // 1st-order high-pass coefficient
+  const vals = [ax, ay, az];
+  for (let k = 0; k < 3; k++) {
+    const s = hpState[k], x = vals[k];
+    if (Number.isNaN(x)) { hp[k][head] = NaN; rawRing[k][head] = 0; s.primed = false; continue; }
+    if (!s.primed) { s.x = x; s.y = 0; s.primed = true; }  // avoid a fake step from gravity
+    const y = rc * (s.y + x - s.x); s.x = x; s.y = y;
+    hp[k][head] = y * 1000; rawRing[k][head] = x;
+  }
+  head = (head + 1) % BUF; total++;
+  if (++sinceHop >= HOP) { sinceHop = 0; specColumn(); }
+}
+
+function onPacket(p) {
+  fs = p.rate || fs;
+  if (p.boot !== lastBoot || p.segment !== lastSeg) expected = null;
+  lastBoot = p.boot; lastSeg = p.segment;
+  if (expected !== null && p.first > expected) {                       // lost samples -> gap
+    for (let i = 0; i < Math.min(p.first - expected, BUF); i++) push(NaN, NaN, NaN);
+  }
+  if (expected !== null && p.first < expected) return;                // duplicate / late
+  const scale = 16384 / (1 << p.accelFs);
+  for (let i = 0; i < p.n; i++) {
+    const o = i * p.words;
+    push(p.data[o] / scale, p.data[o + 1] / scale, p.data[o + 2] / scale);
+  }
+  expected = p.first + p.n;
+}
+
+// ---- FFT (radix-2, in place) ------------------------------------------------
+const win = Float32Array.from({ length: NFFT }, (_, i) => 0.5 - 0.5 * Math.cos(2 * Math.PI * i / NFFT));
+const re = new Float32Array(NFFT), im = new Float32Array(NFFT);
+function fft(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1; for (; j & bit; bit >>= 1) j ^= bit; j ^= bit;
+    if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let j = 0; j < len / 2; j++) {
+        const a = i + j, b = a + len / 2;
+        const tr = re[b] * cr - im[b] * ci, ti = re[b] * ci + im[b] * cr;
+        re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
+        [cr, ci] = [cr * wr - ci * wi, cr * wi + ci * wr];
+      }
+    }
+  }
+}
+
+// Spectrogram columns are kept as dB values; colors are applied at draw time.
+const BINS = NFFT / 2;
+let specCols = [];             // newest last, each Float32Array(BINS) in dB
+let dbLo = -100, dbHi = -40;
+function specColumn() {
+  if (total < NFFT) return;
+  const sel = +document.getElementById("axis").value, axes = sel === 3 ? [0, 1, 2] : [sel];
+  const pow = new Float32Array(BINS);
+  for (const k of axes) {
+    let mean = 0;
+    for (let i = 0; i < NFFT; i++) mean += rawRing[k][(head - NFFT + i + BUF) % BUF];
+    mean /= NFFT;
+    for (let i = 0; i < NFFT; i++) { re[i] = (rawRing[k][(head - NFFT + i + BUF) % BUF] - mean) * win[i]; im[i] = 0; }
+    fft(re, im);
+    for (let b = 0; b < BINS; b++) pow[b] += re[b] * re[b] + im[b] * im[b];
+  }
+  for (let b = 0; b < BINS; b++) pow[b] = 10 * Math.log10(pow[b] + 1e-20);
+  specCols.push(pow);
+  const maxCols = Math.ceil(WINDOW_S * fs / HOP);
+  if (specCols.length > maxCols) specCols.splice(0, specCols.length - maxCols);
+}
+setInterval(() => {            // auto-range: floor at the 20th percentile, 45 dB span
+  if (specCols.length < 10) return;
+  const all = []; for (const c of specCols) for (let b = 2; b < BINS; b += 2) all.push(c[b]);
+  all.sort((a, b) => a - b);
+  dbLo = all[Math.floor(all.length * 0.2)]; dbHi = Math.max(dbLo + 45, all[all.length - 1]);
+}, 1000);
+
+// ---- drawing ----------------------------------------------------------------
+const PAD = { l: 44, r: 8, t: 6, b: 22 };
+function fit(cv) {
+  const r = cv.getBoundingClientRect(), d = devicePixelRatio || 1;
+  if (cv.width !== Math.round(r.width * d) || cv.height !== Math.round(r.height * d)) {
+    cv.width = Math.round(r.width * d); cv.height = Math.round(r.height * d);
+  }
+  const ctx = cv.getContext("2d"); ctx.setTransform(d, 0, 0, d, 0, 0);
+  return { ctx, w: r.width, h: r.height };
+}
+function axesFrame(ctx, w, h, yTicks, yFmt, yOf) {
+  ctx.font = "11px system-ui, sans-serif"; ctx.fillStyle = C.text; ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
+  ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  for (const t of yTicks) {
+    const y = Math.round(yOf(t)) + .5;
+    ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(w - PAD.r, y); ctx.stroke();
+    ctx.fillText(yFmt(t), PAD.l - 6, y);
+  }
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  for (let s = 0; s <= WINDOW_S; s++) {
+    const x = PAD.l + (w - PAD.l - PAD.r) * (s / WINDOW_S);
+    ctx.fillText(s === WINDOW_S ? "now" : `-${WINDOW_S - s}s`, x, h - PAD.b + 6);
+  }
+}
+function niceStep(range) {
+  const raw = range / 4, p = 10 ** Math.floor(Math.log10(raw)), m = raw / p;
+  return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p;
+}
+
+let waveScale = 10, waveHover = null, specHover = null;
+function drawWave() {
+  const { ctx, w, h } = fit(document.getElementById("wave"));
+  ctx.clearRect(0, 0, w, h);
+  const n = Math.min(total, Math.floor(WINDOW_S * fs)), pw = w - PAD.l - PAD.r, ph = h - PAD.t - PAD.b;
+  let peak = 0;
+  for (let k = 0; k < 3; k++) for (let i = 0; i < n; i++) {
+    const v = Math.abs(hp[k][(head - n + i + BUF) % BUF]); if (v > peak) peak = v;
+  }
+  waveScale = Math.max(2, waveScale * 0.97, peak * 1.1);          // decays slowly, grows instantly
+  const yOf = v => PAD.t + ph / 2 - (v / waveScale) * (ph / 2);
+  const step = niceStep(2 * waveScale), ticks = [];
+  for (let t = -Math.floor(waveScale / step) * step; t <= waveScale; t += step) ticks.push(t);
+  axesFrame(ctx, w, h, ticks, t => (Math.abs(t) < 1e-9 ? "0" : +t.toPrecision(3)), yOf);
+  const full = Math.floor(WINDOW_S * fs), x0 = PAD.l + pw * (1 - n / full);
+  ctx.lineWidth = 1.25; ctx.lineJoin = "round";
+  for (let k = 0; k < 3; k++) {          // min/max per pixel column keeps peaks at any zoom
+    ctx.strokeStyle = C.series[k]; ctx.beginPath();
+    const cols = Math.max(1, Math.round(pw * n / full)), per = n / cols;
+    let pen = false;
+    for (let c = 0; c < cols; c++) {
+      let lo = Infinity, hi = -Infinity;
+      for (let i = Math.floor(c * per); i < Math.floor((c + 1) * per); i++) {
+        const v = hp[k][(head - n + i + BUF) % BUF]; if (v < lo) lo = v; if (v > hi) hi = v;
+      }
+      if (!Number.isFinite(lo)) { pen = false; continue; }         // gap: lift the pen
+      const x = x0 + c * pw / full * per;
+      if (!pen) { ctx.moveTo(x, yOf(hi)); pen = true; } else ctx.lineTo(x, yOf(hi));
+      ctx.lineTo(x, yOf(lo));
+    }
+    ctx.stroke();
+  }
+  hoverLine(ctx, waveHover, h, "wavetip", (frac) => {
+    const i = Math.floor(frac * full) - (full - n);
+    if (i < 0 || i >= n) return null;
+    const idx = (head - n + i + BUF) % BUF, ago = ((n - i) / fs).toFixed(2);
+    return `−${ago} s &nbsp;` + AXES.map((a, k) =>
+      `<span class="sw" style="background:${C.series[k]}"></span>${a} ${fmt(hp[k][idx])}`).join(" &nbsp;") + " mg";
+  });
+}
+function fmt(v) { return Number.isFinite(v) ? v.toFixed(2) : "gap"; }
+
+function drawSpec() {
+  const { ctx, w, h } = fit(document.getElementById("spec"));
+  ctx.clearRect(0, 0, w, h);
+  const pw = w - PAD.l - PAD.r, ph = h - PAD.t - PAD.b, nyq = fs / 2;
+  const maxCols = Math.ceil(WINDOW_S * fs / HOP);
+  // paint dB columns into an offscreen image, then scale it into the plot area
+  const img = new ImageData(maxCols, BINS), lut = C.lut, off = maxCols - specCols.length;
+  for (let c = 0; c < specCols.length; c++) {
+    const col = specCols[c];
+    for (let b = 0; b < BINS; b++) {
+      const t = Math.max(0, Math.min(255, Math.round((col[b] - dbLo) / (dbHi - dbLo) * 255)));
+      const p = ((BINS - 1 - b) * maxCols + c + off) * 4;
+      img.data[p] = lut[t * 3]; img.data[p + 1] = lut[t * 3 + 1]; img.data[p + 2] = lut[t * 3 + 2]; img.data[p + 3] = 255;
+    }
+  }
+  const tmp = drawSpec.tmp || (drawSpec.tmp = document.createElement("canvas"));
+  tmp.width = maxCols; tmp.height = BINS; tmp.getContext("2d").putImageData(img, 0, 0);
+  ctx.imageSmoothingEnabled = true; ctx.drawImage(tmp, PAD.l, PAD.t, pw, ph);
+  const ticks = []; for (let f = 0; f <= nyq; f += 100) ticks.push(f);
+  axesFrame(ctx, w, h, ticks, f => `${f} Hz`, f => PAD.t + ph * (1 - f / nyq));
+  drawPitch(ctx, pw, ph, nyq);
+  hoverLine(ctx, specHover, h, "spectip", (frac, yfrac) => {
+    const c = Math.floor(frac * maxCols) - off;
+    if (c < 0 || c >= specCols.length || yfrac < 0 || yfrac > 1) return null;
+    const b = Math.min(BINS - 1, Math.floor((1 - yfrac) * BINS));
+    return `${Math.round(b * nyq / BINS)} Hz &nbsp; −${((specCols.length - c) * HOP / fs).toFixed(2)} s &nbsp; ${specCols[c][b].toFixed(1)} dB`;
+  });
+}
+
+function hoverLine(ctx, hov, h, tipId, text) {
+  const tip = document.getElementById(tipId);
+  if (!hov) { tip.style.display = "none"; return; }
+  const pw = hov.w - PAD.l - PAD.r, frac = (hov.x - PAD.l) / pw, yfrac = (hov.y - PAD.t) / (h - PAD.t - PAD.b);
+  const html = frac >= 0 && frac <= 1 ? text(frac, yfrac) : null;
+  if (!html) { tip.style.display = "none"; return; }
+  ctx.strokeStyle = C.axis; ctx.lineWidth = 1; ctx.beginPath();
+  ctx.moveTo(Math.round(hov.x) + .5, PAD.t); ctx.lineTo(Math.round(hov.x) + .5, h - PAD.b); ctx.stroke();
+  tip.innerHTML = html; tip.style.display = "block";
+  const tw = tip.offsetWidth;
+  tip.style.left = `${Math.min(hov.x + 12, hov.w - tw - 4)}px`; tip.style.top = `${Math.max(0, hov.y - 34)}px`;
+}
+for (const [box, set] of [["wavebox", v => waveHover = v], ["specbox", v => specHover = v]]) {
+  const el = document.getElementById(box);
+  el.addEventListener("mousemove", e => { const r = el.getBoundingClientRect(); set({ x: e.clientX - r.left, y: e.clientY - r.top, w: r.width }); });
+  el.addEventListener("mouseleave", () => set(null));
+}
+document.getElementById("axis").addEventListener("change", () => { specCols = []; });
+
+(function frame() { drawWave(); drawSpec(); requestAnimationFrame(frame); })();
+
+// ---- status panel -----------------------------------------------------------
+const meters = document.getElementById("meters");
+meters.innerHTML = AXES.map((a, k) => `
+  <div class="meter"><div class="row"><span><span class="sw" style="background:var(--series-${k + 1})"></span>${a}</span>
+  <span class="num"><span class="big" id="vib${k}">–</span> mg</span></div>
+  <div class="bar"><div id="vbar${k}" style="background:var(--series-${k + 1})"></div></div></div>`).join("");
+let vibMax = 10;
+
+function onStatus(s) {
+  const live = s.receiving;
+  document.getElementById("dot").className = "dot " + (live ? "ok" : "bad");
+  document.getElementById("conn").textContent = live ? "streaming" : (s.device ? "no data from device" : "searching for device…");
+  document.getElementById("rate").textContent = s.rate_hz ? `${s.rate_hz.toFixed(1)} Hz` : "–";
+  document.getElementById("lost").textContent = s.lost;
+  document.getElementById("disc").textContent = s.discontinuities;
+  document.getElementById("dev").textContent = s.device || "–";
+  if (s.voice_rms_mg) {
+    vibMax = Math.max(10, vibMax * 0.98, ...s.voice_rms_mg);
+    s.voice_rms_mg.forEach((v, k) => {
+      document.getElementById(`vib${k}`).textContent = v.toFixed(2);
+      document.getElementById(`vbar${k}`).style.width = `${Math.min(100, v / vibMax * 100)}%`;
+    });
+  }
+  if (s.accel_mean_g) document.getElementById("grav").innerHTML =
+    s.accel_mean_g.map((v, k) => `${AXES[k]} ${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(3)}`).join(" &nbsp; ");
+  document.getElementById("devstats").innerHTML =
+    `FIFO overflows <b>${s.fifo_overflows ?? "–"}</b><br>TX queue drops <b>${s.queue_drops ?? "–"}</b><br>` +
+    `reboots <b>${s.reboots}</b> · bad packets <b>${s.bad}</b>`;
+  setRec(s.recording);
+}
+
+function onVoice(m) {
+  voiceRate = m.rate_hz || voiceRate;
+  for (const [s, v, f0, snr] of m.frames) {
+    voiceFrames.push({ s, v, f0 });
+    if (v && !lastVoiced) utterances++;
+    lastVoiced = v;
+    if (v && f0 !== null) lastPitch = { f0, snr };
+  }
+  const keep = (WINDOW_S + 1) * voiceRate;
+  while (voiceFrames.length && expected !== null && voiceFrames[0].s < expected - keep) voiceFrames.shift();
+  document.getElementById("vdot").className = "dot " + (lastVoiced ? "ok" : "");
+  document.getElementById("vstate").textContent = lastVoiced ? "Speaking" : "Silent";
+  document.getElementById("vf0").textContent = lastVoiced && lastPitch ? lastPitch.f0.toFixed(0) : "–";
+  document.getElementById("vinfo").textContent =
+    `${utterances} utterance${utterances === 1 ? "" : "s"}` + (lastPitch ? ` · last f0 ${lastPitch.f0.toFixed(0)} Hz, SNR ${lastPitch.snr.toFixed(0)} dB` : "");
+}
+
+function drawPitch(ctx, pw, ph, nyq) {
+  if (expected === null) return;
+  const full = WINDOW_S * fs;
+  ctx.strokeStyle = C.series[1]; ctx.lineWidth = 2; ctx.lineJoin = ctx.lineCap = "round";
+  ctx.beginPath();
+  let pen = false;
+  for (const fr of voiceFrames) {
+    const age = expected - (fr.s + NFFT_DET / 2);          // window end = spectrogram column time
+    if (!fr.v || fr.f0 === null || age > full || age < 0) { pen = false; continue; }
+    const x = PAD.l + pw * (1 - age / full), y = PAD.t + ph * (1 - fr.f0 / nyq);
+    if (pen) ctx.lineTo(x, y); else { ctx.moveTo(x, y); pen = true; }
+  }
+  ctx.stroke();
+}
+
+// ---- recording --------------------------------------------------------------
+const recbtn = document.getElementById("recbtn");
+let recording = null;
+function setRec(r) {
+  recording = r;
+  recbtn.textContent = r ? "■ Stop" : "● Record";
+  recbtn.classList.toggle("recording", !!r);
+  document.getElementById("recinfo").textContent = r ? `${r.file} · ${r.seconds.toFixed(0)} s · ${r.lost} lost` : "";
+}
+recbtn.addEventListener("click", async () => {
+  const body = recording ? { action: "stop" } : { action: "start", label: document.getElementById("label").value };
+  const res = await fetch("/api/record", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (res.ok) setRec((await res.json()).recording);
+});
+
+// ---- websocket --------------------------------------------------------------
+function connect() {
+  const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+  ws.binaryType = "arraybuffer";
+  ws.onmessage = e => {
+    if (typeof e.data === "string") { const m = JSON.parse(e.data); if (m.type === "status") onStatus(m); else if (m.type === "voice") onVoice(m); }
+    else { const p = parsePacket(e.data); if (p) onPacket(p); }
+  };
+  ws.onclose = () => {
+    document.getElementById("dot").className = "dot bad";
+    document.getElementById("conn").textContent = "hub offline, reconnecting…";
+    setTimeout(connect, 1000);
+  };
+}
+connect();
+</script>
+</body>
+</html>

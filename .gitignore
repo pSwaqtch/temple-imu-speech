@@ -1,0 +1,8 @@
+firmware/build/
+firmware/sdkconfig.old
+firmware/main/secrets.h
+host/.venv/
+host/recordings/
+__pycache__/
+firmware/sdkconfig
+.cache/
