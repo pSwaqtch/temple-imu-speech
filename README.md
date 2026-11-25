@@ -25,12 +25,21 @@ Held "hellooo"s give longer lines, which the detector follows for their whole le
 *(This screenshot is from before the sustain fix described below: the detector only caught the
 start of each word. It now tracks the full line, as in the dashboard image at the top.)*
 
+On 2026-11-25 (cause not yet pinned down: placement, contact pressure or speaking level) the harmonics appeared clearly. Seven held "hmm"s
+show a stack of lines at ~110, 220, 330, 440 and 550 Hz (f0 and its 2nd–5th harmonics); the blue
+line is the detected pitch:
+
+<img src="docs/images/spectrogram-hmms-pitch.png" width="720" alt="Spectrogram of seven held hmms showing f0 near 110 Hz and harmonics up to about 550 Hz, with the detected pitch overlaid">
+
+*The full-height stripes (~4.1, 7.1 and 17.4 s) are knocks; today they split those hmms into two
+detected segments.*
+
 What we've learned so far:
 
 | | |
 |---|---|
 | **Pitch (f0)** | Clearly visible: 10–14 dB above the sensor noise in its frequency bin. |
-| **Harmonics** | Weak: 2nd harmonic +3–6 dB, 3rd at the noise floor. So today the signal carries *voicing and pitch*, not much of the detail that distinguishes words. |
+| **Harmonics** | Depend on how the sensor sits. On 2026-11-24 they were weak (2nd +3–6 dB, 3rd at the noise floor); on 2026-11-25 the 2nd–5th were clearly visible, the 2nd often stronger than f0. |
 | **Sensor noise** | ~140 µg/√Hz measured (datasheet 230), i.e. ~3.5 mg RMS per axis in 80–500 Hz. This is the limiting factor; contact pressure is the cheapest lever. |
 | **Link** | ~1135 Hz true sample rate, 0 samples lost over WiFi in all recordings so far. |
 
@@ -66,10 +75,12 @@ pitch line between 70 and 350 Hz** standing out from an adaptive noise estimate:
   because voicing weakens after the start of a word.
 - **Taps and cable knocks** are rejected by their sudden sample-to-sample jumps, far bigger than
   bone-conducted voice ever produces.
+- **Pitch** is the strongest line, unless half, a third or a quarter of its frequency is also a peak
+  above the noise: then that is the real pitch and the strongest line was a harmonic.
 - The noise estimate ignores anything that looks like voice, so long utterances don't teach it to
   treat the voice as noise.
 
-Results on the recordings collected so far (one speaker, one session):
+Results on the recordings collected so far (one speaker, two sessions):
 
 | Recording | What it contains | Result |
 |---|---|---|
@@ -77,6 +88,8 @@ Results on the recordings collected so far (one speaker, one session):
 | `long_hello` | 5 held "hellooo"s, 0.7–1.3 s each | **5 / 5**, tracked for their full length, f0 ~119 Hz |
 | `negatives` | chewing, nodding, re-placing the sensor; no speech | **2** short false alarms (was 25 before the line-shape test) |
 | `bench_check` | sensor still, no speech | **0** false alarms |
+| `long_sentence` | "hello this is me speaking" ×3, then two long hellos | 18 segments; f0 95–114 Hz (read an octave high, ~210 Hz, before the harmonic check) |
+| `hmm` | 7 held "hmm"s, 1.5–2.5 s each | f0 108–113 Hz throughout; **11** segments, since knocks split 3 hmms, plus 1 short false start |
 
 This is a small test set; thresholds will be revisited as more varied data comes in.
 
@@ -152,6 +165,8 @@ r.accel_g, r.gyro_dps, r.sample_index, r.segment, r.rate_hz
 
 ```sh
 uv run python -m timu.voice recordings/*.timu    # run the voice detector over recordings
+uv run --with matplotlib --with scipy python -m timu.plot recordings/*.timu
+                                                 # spectrogram + detected pitch -> <recording>.png
 ```
 
 ## Protocol

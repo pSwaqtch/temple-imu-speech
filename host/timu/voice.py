@@ -15,8 +15,9 @@ Method (per hop of ~28 ms, on a ~225 ms Hann window):
      sustain: once voiced, only the bins near the current f0 are checked, against the lower
      sustain_snr_db / sustain_peakiness_db (voicing weakens after the attack)
   4. hysteresis: `onset` candidate frames in a row start voicing, `release` misses end it
-  5. f0 = peak bin (kept within +-35% of the previous f0 while voiced, to avoid octave slips),
-     refined by parabolic interpolation
+  5. f0 = peak bin, moved at onset down to k/2, k/3 or k/4 when that subharmonic is itself a peak
+     above the floor (the strongest line is often h2); while voiced it is kept within -20%/+25% of
+     the previous f0 to avoid octave slips; refined by parabolic interpolation
 
 Offline:  uv run python -m timu.voice recordings/<file>.timu
 Live:     the hub runs this and pushes results to the web page / websocket clients.
@@ -115,6 +116,19 @@ class VoiceDetector:
 
     # -- analysis ------------------------------------------------------------
 
+    def _fundamental(self, k: int, snr: np.ndarray, f: np.ndarray) -> int:
+        """The strongest line may be a harmonic (bone conduction often makes h2 stronger than f0).
+        Return the bin of the lowest in-band k/n (n = 4, 3, 2) that is itself a local spectral peak
+        at least sustain_snr_db over the noise floor, else k."""
+        for n in (4, 3, 2):
+            c = int(round(k / n))
+            if c < 2 or f[c] < self.f0_range[0]:
+                continue
+            j = c - 1 + int(np.argmax(snr[c - 1:c + 2]))
+            if snr[j] >= self.sustain_snr_th and snr[j] >= snr[j - 1] and snr[j] >= snr[j + 1]:
+                return j
+        return k
+
     def _analyze(self, x: np.ndarray, first: int) -> VoiceFrame:
         fs = self.rate_hz
         jump = float(np.abs(np.diff(x, axis=0)).max())
@@ -161,6 +175,8 @@ class VoiceDetector:
                          and not transient)
         else:
             candidate = onset_level and not transient
+            if candidate:
+                k = self._fundamental(k, snr, f)
         peakiness = peak - wide_median
 
         # hysteresis

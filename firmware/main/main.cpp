@@ -190,6 +190,19 @@ static void sensorTask(void*) {
 // WiFi + UDP
 // ---------------------------------------------------------------------------
 
+struct WifiNet { const char* ssid; const char* pass; };
+static const WifiNet kWifiNets[] = WIFI_NETWORKS;
+static constexpr int kNumWifiNets = sizeof(kWifiNets) / sizeof(kWifiNets[0]);
+static int g_wifi_idx = 0;
+
+static void applyWifiNet() {
+  wifi_config_t wc = {};
+  strncpy(reinterpret_cast<char*>(wc.sta.ssid), kWifiNets[g_wifi_idx].ssid, sizeof(wc.sta.ssid));
+  strncpy(reinterpret_cast<char*>(wc.sta.password), kWifiNets[g_wifi_idx].pass, sizeof(wc.sta.password));
+  ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
+  ESP_LOGI(TAG, "wifi trying \"%s\"", kWifiNets[g_wifi_idx].ssid);
+}
+
 static void onNetEvent(void*, esp_event_base_t base, int32_t id, void* data) {
   if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
     esp_wifi_connect();
@@ -197,13 +210,17 @@ static void onNetEvent(void*, esp_event_base_t base, int32_t id, void* data) {
     g_wifi_up = false;
     auto* d = static_cast<wifi_event_sta_disconnected_t*>(data);
     ESP_LOGW(TAG, "wifi disconnected (reason %d), reconnecting", d->reason);
+    if (kNumWifiNets > 1) {
+      g_wifi_idx = (g_wifi_idx + 1) % kNumWifiNets;
+      applyWifiNet();
+    }
     esp_wifi_connect();
   } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
     auto* e = static_cast<ip_event_got_ip_t*>(data);
     g_ip = e->ip_info.ip.addr;
     g_ip_gen++;
     g_wifi_up = true;
-    ESP_LOGI(TAG, "wifi connected, ip " IPSTR, IP2STR(&e->ip_info.ip));
+    ESP_LOGI(TAG, "wifi connected to \"%s\", ip " IPSTR, kWifiNets[g_wifi_idx].ssid, IP2STR(&e->ip_info.ip));
   }
 }
 
@@ -224,11 +241,8 @@ static void wifiInit() {
   ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, onNetEvent, nullptr));
   ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, onNetEvent, nullptr));
 
-  wifi_config_t wc = {};
-  strncpy(reinterpret_cast<char*>(wc.sta.ssid), WIFI_SSID, sizeof(wc.sta.ssid));
-  strncpy(reinterpret_cast<char*>(wc.sta.password), WIFI_PASS, sizeof(wc.sta.password));
   ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-  ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
+  applyWifiNet();
   ESP_ERROR_CHECK(esp_wifi_start());
   // Modem sleep adds 100+ ms latency spikes and packet loss; this device is always streaming.
   ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
